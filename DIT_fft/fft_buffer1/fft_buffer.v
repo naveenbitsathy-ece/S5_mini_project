@@ -1,77 +1,43 @@
-`timescale 1ns/1ps
+`timescale 1ns / 1ps
 
-module fft_buffer #(
-    parameter FFT_SIZE   = 16,
-    parameter DATA_WIDTH = 12
-)(
-    input  wire                     clk,
-    input  wire                     rst_n,
+module fft_buffer (
+    input  wire        clk,
+    input  wire        rst_n,
+    input  wire [15:0] sample_in_buff,
+    input  wire        input_valid_buff,
 
-    // Write side
-    input  wire [DATA_WIDTH-1:0]    filtered_data,
-    input  wire                     filtered_valid,
-
-    // Read side
-    input  wire                     buffer_read_en,
-    input  wire [$clog2(FFT_SIZE)-1:0] buffer_addr,
-    output reg  [DATA_WIDTH-1:0]    buffer_data,
-
-    // Frame status
-    output reg                     fft_frame_valid
+    output reg  [7:0]  sample_count,
+    output reg         buffer_full
 );
 
-    reg [DATA_WIDTH-1:0] fft_buffer [0:FFT_SIZE-1];
+    localparam DATA_WIDTH = 16;
+    localparam N_b          = 256;
+    localparam ADDR_WIDTH = 8;
 
-    reg [$clog2(FFT_SIZE)-1:0] sample_count;
+    reg [DATA_WIDTH-1:0] fft_mem [0:N_b-1];
 
     integer i;
 
-    always @(posedge clk or negedge rst_n) begin
-
+    always @(posedge clk) begin
         if (!rst_n) begin
+            sample_count <= 0;
+            buffer_full  <= 1'b0;
 
-            sample_count    <= 0;
-            fft_frame_valid <= 1'b0;
-            buffer_data     <= 0;
-
-            for (i = 0; i < FFT_SIZE; i = i + 1)
-                fft_buffer[i] <= 0;
-
+            for (i = 0; i < N_b; i = i + 1)
+                fft_mem[i] <= {DATA_WIDTH{1'b0}};
         end
-
         else begin
+            if (input_valid_buff && !buffer_full) begin
+                fft_mem[sample_count] <= sample_in_buff;
 
-            // Default
-            fft_frame_valid <= 1'b0;
-
-            //-----------------------------------------
-            // WRITE FILTERED SAMPLE
-            //-----------------------------------------
-
-            if (filtered_valid) begin
-
-                fft_buffer[sample_count] <= filtered_data;
-
-                if (sample_count == FFT_SIZE-1) begin
-                    sample_count    <= 0;
-                    fft_frame_valid <= 1'b1;
+                if (sample_count == N_b-1) begin
+                    buffer_full <= 1'b1;
                 end
                 else begin
                     sample_count <= sample_count + 1'b1;
                 end
-
             end
-
-            //-----------------------------------------
-            // READ FFT SAMPLE
-            //-----------------------------------------
-
-            if (buffer_read_en) begin
-                buffer_data <= fft_buffer[buffer_addr];
-            end
-
         end
-
     end
 
 endmodule

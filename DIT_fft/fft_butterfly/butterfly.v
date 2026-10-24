@@ -1,127 +1,58 @@
-`timescale 1ns/1ps
+`timescale 1ns / 1ps
 
-module butterfly #(
-    parameter DATA_WIDTH = 12,
-    parameter TWIDDLE_WIDTH = 16,
-    parameter OUTPUT_WIDTH = DATA_WIDTH + TWIDDLE_WIDTH
-)(
-    input  wire                         clk,
-    input  wire                         rst_n,
+module dit_fft_butterfly (
+    input  wire signed [15:0] a_real,
+    input  wire signed [15:0] a_imag,
+    input  wire signed [15:0] b_real,
+    input  wire signed [15:0] b_imag,
 
-    // Complex input A
-    input  wire signed [DATA_WIDTH-1:0] A_real,
-    input  wire signed [DATA_WIDTH-1:0] A_imag,
+    // Twiddle factor: W = wr + j*wi
+    input  wire signed [15:0] wr,
+    input  wire signed [15:0] wi,
 
-    // Complex input B
-    input  wire signed [DATA_WIDTH-1:0] B_real,
-    input  wire signed [DATA_WIDTH-1:0] B_imag,
-
-    // Complex twiddle factor W
-    input  wire signed [TWIDDLE_WIDTH-1:0] W_real,
-    input  wire signed [TWIDDLE_WIDTH-1:0] W_imag,
-
-    input  wire valid_in,
-
-    // Complex output X
-    output reg signed [OUTPUT_WIDTH:0] X_real,
-    output reg signed [OUTPUT_WIDTH:0] X_imag,
-
-    // Complex output Y
-    output reg signed [OUTPUT_WIDTH:0] Y_real,
-    output reg signed [OUTPUT_WIDTH:0] Y_imag,
-
-    output reg valid_out
+    // Butterfly outputs have one extra bit for addition growth
+    output wire signed [16:0] x_real,
+    output wire signed [16:0] x_imag,
+    output wire signed [16:0] y_real,
+    output wire signed [16:0] y_imag
 );
 
-    //------------------------------------------------
-    // Intermediate multiplication
-    //------------------------------------------------
+    localparam DATA_WIDTH  = 16;
+    localparam COEFF_WIDTH = 16;
+    localparam FRAC_BITS   = 15;
+    localparam PROD_WIDTH  = DATA_WIDTH + COEFF_WIDTH;
+    localparam SUM_WIDTH   = PROD_WIDTH + 1;
 
-    reg signed [DATA_WIDTH+TWIDDLE_WIDTH-1:0] mult1;
-    reg signed [DATA_WIDTH+TWIDDLE_WIDTH-1:0] mult2;
-    reg signed [DATA_WIDTH+TWIDDLE_WIDTH-1:0] mult3;
-    reg signed [DATA_WIDTH+TWIDDLE_WIDTH-1:0] mult4;
+    // Complex multiplication: T = B * W
+    wire signed [PROD_WIDTH-1:0] p1;
+    wire signed [PROD_WIDTH-1:0] p2;
+    wire signed [PROD_WIDTH-1:0] p3;
+    wire signed [PROD_WIDTH-1:0] p4;
 
-    reg signed [DATA_WIDTH+TWIDDLE_WIDTH:0] BW_real;
-    reg signed [DATA_WIDTH+TWIDDLE_WIDTH:0] BW_imag;
+    assign p1 = b_real * wr;
+    assign p2 = b_imag * wi;
+    assign p3 = b_real * wi;
+    assign p4 = b_imag * wr;
 
-    //------------------------------------------------
-    // Butterfly
-    //
-    // BW = B × W
-    //
-    // BW_real = B_real*W_real - B_imag*W_imag
-    //
-    // BW_imag = B_real*W_imag + B_imag*W_real
-    //
-    // X = A + BW
-    // Y = A - BW
-    //------------------------------------------------
+    // Keep full precision during multiplication and addition
+    wire signed [SUM_WIDTH-1:0] t_real_full;
+    wire signed [SUM_WIDTH-1:0] t_imag_full;
 
-    always @(posedge clk or negedge rst_n)
-    begin
+    assign t_real_full = $signed(p1) - $signed(p2);
+    assign t_imag_full = $signed(p3) + $signed(p4);
 
-        if (!rst_n)
-        begin
+    // Convert fixed-point product back to the input scale
+    wire signed [SUM_WIDTH-1:0] t_real;
+    wire signed [SUM_WIDTH-1:0] t_imag;
 
-            mult1 = 0;
-            mult2 = 0;
-            mult3 = 0;
-            mult4 = 0;
+    assign t_real = t_real_full >>> FRAC_BITS;
+    assign t_imag = t_imag_full >>> FRAC_BITS;
 
-            BW_real = 0;
-            BW_imag = 0;
+    // DIT butterfly: X = A + T, Y = A - T
+    assign x_real = a_real + t_real;
+    assign x_imag = a_imag + t_imag;
 
-            X_real <= 0;
-            X_imag <= 0;
-
-            Y_real <= 0;
-            Y_imag <= 0;
-
-            valid_out <= 1'b0;
-        end
-
-        else
-        begin
-
-            valid_out <= 1'b0;
-
-            if (valid_in)
-            begin
-
-                //----------------------------------------
-                // Complex multiplication
-                //----------------------------------------
-
-                mult1 = B_real * W_real;
-                mult2 = B_imag * W_imag;
-
-                mult3 = B_real * W_imag;
-                mult4 = B_imag * W_real;
-
-                BW_real = mult1 - mult2;
-                BW_imag = mult3 + mult4;
-
-                //----------------------------------------
-                // Butterfly addition
-                //----------------------------------------
-
-                X_real <= A_real + BW_real;
-                X_imag <= A_imag + BW_imag;
-
-                //----------------------------------------
-                // Butterfly subtraction
-                //----------------------------------------
-
-                Y_real <= A_real - BW_real;
-                Y_imag <= A_imag - BW_imag;
-
-                valid_out <= 1'b1;
-
-            end
-
-        end
-
-    end
+    assign y_real = a_real - t_real;
+    assign y_imag = a_imag - t_imag;
 
 endmodule

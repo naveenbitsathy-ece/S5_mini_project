@@ -1,386 +1,186 @@
-`timescale 1ns/1ps
+`timescale 1ns / 1ps
 
-module fft_dit_controller #(
-    parameter FFT_SIZE   = 16,
-    parameter DATA_WIDTH = 12,
-    parameter TW_WIDTH   = 16
+module dit_fft_controller #(
+    parameter N               = 256,
+    parameter DATA_WIDTH      = 16,
+    parameter COEFF_WIDTH     = 16,
+    parameter FRAC_BITS       = 15,
+    parameter ADDR_WIDTH      = $clog2(N),
+    parameter STAGE_WIDTH     = $clog2($clog2(N)+1),
+    parameter SCALE_PER_STAGE = 1
 )(
-    input wire clk,
-    input wire rst_n,
+    input  wire        clk,
+    input  wire        rst_n,
 
-    //------------------------------------------------
-    // Input from FFT buffer / Input Controller
-    //------------------------------------------------
+    input  wire        start,
+    input  wire [DATA_WIDTH-1:0] sample_in,
+    input  wire        input_valid,
 
-    input wire [DATA_WIDTH-1:0] fft_data,
-    input wire                  fft_valid,
-    input wire                  fft_frame_valid,
+    output reg         busy,
+    output reg         done,
 
-    //------------------------------------------------
-    // Data to Butterfly
-    //------------------------------------------------
-
-    output reg signed [DATA_WIDTH-1:0] A_real,
-    output reg signed [DATA_WIDTH-1:0] A_imag,
-
-    output reg signed [DATA_WIDTH-1:0] B_real,
-    output reg signed [DATA_WIDTH-1:0] B_imag,
-
-    //------------------------------------------------
-    // Twiddle factor to Butterfly
-    //------------------------------------------------
-
-    output reg signed [TW_WIDTH-1:0] W_real,
-    output reg signed [TW_WIDTH-1:0] W_imag,
-
-    output reg butterfly_valid,
-
-    //------------------------------------------------
-    // FFT complete
-    //------------------------------------------------
-
-    output reg fft_done
+    input  wire [ADDR_WIDTH-1:0] output_addr,
+    output wire signed [DATA_WIDTH-1:0] output_real,
+    output wire signed [DATA_WIDTH-1:0] output_imag
 );
 
-    //------------------------------------------------
-    // FFT Memory
-    //------------------------------------------------
+    reg signed [DATA_WIDTH-1:0] real_mem [0:N-1];
+    reg signed [DATA_WIDTH-1:0] imag_mem [0:N-1];
 
-    reg signed [DATA_WIDTH-1:0] real_mem [0:FFT_SIZE-1];
+    reg [ADDR_WIDTH-1:0] sample_count;
+    reg [ADDR_WIDTH-1:0] group_base;
+    reg [ADDR_WIDTH-1:0] j;
+    reg [STAGE_WIDTH-1:0] stage;
 
-    reg signed [DATA_WIDTH-1:0] imag_mem [0:FFT_SIZE-1];
+    reg [ADDR_WIDTH-1:0] half_size;
+    reg [ADDR_WIDTH:0]   span; // 9 bits to accommodate span == N (256)
+    reg [ADDR_WIDTH-1:0] twiddle_addr;
+    reg                  samples_ready;
 
-    //------------------------------------------------
-    // Controller states
-    //------------------------------------------------
+    wire signed [COEFF_WIDTH-1:0] wr;
+    wire signed [COEFF_WIDTH-1:0] wi;
 
-    localparam IDLE      = 3'd0;
-    localparam LOAD      = 3'd1;
-    localparam PREPARE   = 3'd2;
-    localparam CALCULATE = 3'd3;
-    localparam WRITEBACK = 3'd4;
-    localparam DONE      = 3'd5;
+   
+    reg input_valid_d;
+    always @(posedge clk) begin
+        if (!rst_n)
+            input_valid_d <= 1'b0;
+        else
+            input_valid_d <= input_valid;
+    end
 
-    reg [2:0] state;
+    wire sample_pulse = input_valid && !input_valid_d;
 
-    //------------------------------------------------
-    // Counters
-    //------------------------------------------------
+    // Twiddle factor ROM
+    fft_twiddle_rom twiddle_rom (
+        .addr(twiddle_addr[ADDR_WIDTH-2:0]),
+        .twiddle_real(wr),
+        .twiddle_imag(wi)
+    );
 
-    reg [4:0] input_count;
-
-    reg [2:0] stage;
-
-    reg [3:0] butterfly_count;
-
-    //------------------------------------------------
-    // Address variables
-    //------------------------------------------------
-
-    integer half_size;
-    integer group_size;
-
-    integer j;
-    integer group_start;
-
-    integer addr_a;
-    integer addr_b;
-
-    integer twiddle_index;
-
-    //------------------------------------------------
-    // Bit reverse function
-    //------------------------------------------------
-
-    function [3:0] bit_reverse_4;
-
-        input [3:0] value;
-
+    // Bit-reverse an input sample index
+    function [ADDR_WIDTH-1:0] reverse_bits;
+        input [ADDR_WIDTH-1:0] value;
+        integer b;
         begin
-
-            bit_reverse_4[3] = value[0];
-            bit_reverse_4[2] = value[1];
-            bit_reverse_4[1] = value[2];
-            bit_reverse_4[0] = value[3];
-
+            for (b = 0; b < ADDR_WIDTH; b = b + 1)
+                reverse_bits[b] = value[ADDR_WIDTH-1-b];
         end
-
     endfunction
 
-    //------------------------------------------------
-    // Main Controller
-    //------------------------------------------------
-
-    always @(posedge clk or negedge rst_n)
-    begin
-
-        if (!rst_n)
-        begin
-
-            state            <= IDLE;
-
-            input_count      <= 0;
-            stage             <= 0;
-            butterfly_count <= 0;
-
-            A_real <= 0;
-            A_imag <= 0;
-
-            B_real <= 0;
-            B_imag <= 0;
-
-            W_real <= 0;
-            W_imag <= 0;
-
-            butterfly_valid <= 0;
-            fft_done        <= 0;
-
+    // Stage and twiddle address calculations
+    always @(*) begin
+        if (stage != 0) begin
+            half_size    = {{(ADDR_WIDTH-1){1'b0}}, 1'b1} << (stage - 1'b1);
+            span         = {1'b0, half_size} << 1;
+            twiddle_addr = j << (ADDR_WIDTH - stage);
         end
+        else begin
+            half_size    = {ADDR_WIDTH{1'b0}};
+            span         = {(ADDR_WIDTH+1){1'b0}};
+            twiddle_addr = {ADDR_WIDTH{1'b0}};
+        end
+    end
 
-        else
-        begin
+    // Butterfly arithmetic module integration
+    wire [ADDR_WIDTH-1:0] addr_a = group_base + j;
+    wire [ADDR_WIDTH-1:0] addr_b = group_base + j + half_size;
 
-            butterfly_valid <= 1'b0;
-            fft_done        <= 1'b0;
+    wire signed [DATA_WIDTH:0] x_real;
+    wire signed [DATA_WIDTH:0] x_imag;
+    wire signed [DATA_WIDTH:0] y_real;
+    wire signed [DATA_WIDTH:0] y_imag;
 
-            case(state)
+    dit_fft_butterfly u_butterfly (
+        .a_real(real_mem[addr_a]),
+        .a_imag(imag_mem[addr_a]),
+        .b_real(real_mem[addr_b]),
+        .b_imag(imag_mem[addr_b]),
+        .wr(wr),
+        .wi(wi),
+        .x_real(x_real),
+        .x_imag(x_imag),
+        .y_real(y_real),
+        .y_imag(y_imag)
+    );
 
-                //------------------------------------------------
-                // WAIT
-                //------------------------------------------------
+    assign output_real = real_mem[output_addr];
+    assign output_imag = imag_mem[output_addr];
 
-                IDLE:
-                begin
+    always @(posedge clk) begin
+        if (!rst_n) begin
+            sample_count  <= 0;
+            group_base    <= 0;
+            j             <= 0;
+            stage         <= 0;
+            busy          <= 0;
+            done          <= 0;
+            samples_ready <= 0;
+        end
+        else begin
+            done <= 1'b0;
 
-                    input_count <= 0;
+            
+            if (!busy && sample_pulse) begin
+                real_mem[reverse_bits(sample_count)] <= $signed(sample_in);
+                imag_mem[reverse_bits(sample_count)] <= 16'sh0000;
 
-                    if (fft_frame_valid)
-                    begin
-                        state <= LOAD;
-                    end
+                if (sample_count == N-1) begin
+                    sample_count  <= 0;
+                    samples_ready <= 1'b1;
+                end
+                else begin
+                    sample_count <= sample_count + 1'b1;
+                end
+            end
 
+         
+            if ((start || samples_ready) && !busy) begin
+                busy          <= 1'b1;
+                stage         <= 1;
+                group_base    <= 0;
+                j             <= 0;
+                samples_ready <= 1'b0;
+            end
+
+            if (busy) begin
+                if (SCALE_PER_STAGE) begin
+                    real_mem[addr_a] <= x_real >>> 1;
+                    imag_mem[addr_a] <= x_imag >>> 1;
+                    real_mem[addr_b] <= y_real >>> 1;
+                    imag_mem[addr_b] <= y_imag >>> 1;
+                end
+                else begin
+                    real_mem[addr_a] <= x_real[DATA_WIDTH-1:0];
+                    imag_mem[addr_a] <= x_imag[DATA_WIDTH-1:0];
+                    real_mem[addr_b] <= y_real[DATA_WIDTH-1:0];
+                    imag_mem[addr_b] <= y_imag[DATA_WIDTH-1:0];
                 end
 
-                //------------------------------------------------
-                // LOAD INPUT DATA
-                //
-                // Store input in bit-reversed order
-                //------------------------------------------------
+                if (j == half_size - 1'b1) begin
+                    j <= 0;
 
-                LOAD:
-                begin
+                    if ({1'b0, group_base} + span >= N) begin
+                        group_base <= 0;
 
-                    if (fft_valid)
-                    begin
-
-                        real_mem[bit_reverse_4(input_count[3:0])]
-                            <= fft_data;
-
-                        imag_mem[bit_reverse_4(input_count[3:0])]
-                            <= 0;
-
-                        if (input_count == FFT_SIZE-1)
-                        begin
-
-                            input_count <= 0;
+                        if (stage == ADDR_WIDTH) begin
+                            busy  <= 1'b0;
+                            done  <= 1'b1;
                             stage <= 0;
-                            butterfly_count <= 0;
-
-                            state <= PREPARE;
-
                         end
-
-                        else
-                        begin
-                            input_count <= input_count + 1'b1;
-                        end
-
-                    end
-
-                end
-
-                //------------------------------------------------
-                // PREPARE BUTTERFLY
-                //------------------------------------------------
-
-                PREPARE:
-                begin
-
-                    //------------------------------------------------
-                    // Stage parameters
-                    //------------------------------------------------
-
-                    half_size = (1 << stage);
-
-                    group_size = half_size * 2;
-
-                    //------------------------------------------------
-                    // Calculate j and group
-                    //------------------------------------------------
-
-                    j = butterfly_count % half_size;
-
-                    group_start =
-                        (butterfly_count / half_size) * group_size;
-
-                    //------------------------------------------------
-                    // A address
-                    //------------------------------------------------
-
-                    addr_a = group_start + j;
-
-                    //------------------------------------------------
-                    // B address
-                    //------------------------------------------------
-
-                    addr_b = addr_a + half_size;
-
-                    //------------------------------------------------
-                    // Read A
-                    //------------------------------------------------
-
-                    A_real <= real_mem[addr_a];
-                    A_imag <= imag_mem[addr_a];
-
-                    //------------------------------------------------
-                    // Read B
-                    //------------------------------------------------
-
-                    B_real <= real_mem[addr_b];
-                    B_imag <= imag_mem[addr_b];
-
-                    //------------------------------------------------
-                    // Twiddle index
-                    //------------------------------------------------
-
-                    twiddle_index =
-                        j * FFT_SIZE / group_size;
-
-                    //------------------------------------------------
-                    // Temporary twiddle generation
-                    //
-                    // Stage testing values
-                    //------------------------------------------------
-
-                    case(twiddle_index)
-
-                        0:
-                        begin
-                            W_real <= 16'sd1;
-                            W_imag <= 16'sd0;
-                        end
-
-                        1:
-                        begin
-                            W_real <= 16'sd0;
-                            W_imag <= -16'sd1;
-                        end
-
-                        2:
-                        begin
-                            W_real <= -16'sd1;
-                            W_imag <= 16'sd0;
-                        end
-
-                        3:
-                        begin
-                            W_real <= 16'sd0;
-                            W_imag <= 16'sd1;
-                        end
-
-                        default:
-                        begin
-                            W_real <= 16'sd1;
-                            W_imag <= 16'sd0;
-                        end
-
-                    endcase
-
-                    state <= CALCULATE;
-
-                end
-
-                //------------------------------------------------
-                // SEND TO BUTTERFLY
-                //------------------------------------------------
-
-                CALCULATE:
-                begin
-
-                    butterfly_valid <= 1'b1;
-
-                    state <= WRITEBACK;
-
-                end
-
-                //------------------------------------------------
-                // WRITE RESULT BACK
-                //------------------------------------------------
-
-                WRITEBACK:
-                begin
-
-                    /*
-                     * The actual X/Y outputs from the butterfly
-                     * should be connected here.
-                     *
-                     * This controller currently only generates
-                     * the address/control sequence.
-                     */
-
-                    if (butterfly_count ==
-                        (FFT_SIZE/2)-1)
-                    begin
-
-                        butterfly_count <= 0;
-
-                        if (stage == 3)
-                        begin
-                            state <= DONE;
-                        end
-
-                        else
-                        begin
+                        else begin
                             stage <= stage + 1'b1;
-                            state <= PREPARE;
                         end
-
                     end
-
-                    else
-                    begin
-
-                        butterfly_count <=
-                            butterfly_count + 1'b1;
-
-                        state <= PREPARE;
-
+                    else begin
+                        group_base <= group_base + span[ADDR_WIDTH-1:0];
                     end
-
                 end
-
-                //------------------------------------------------
-                // FFT COMPLETE
-                //------------------------------------------------
-
-                DONE:
-                begin
-
-                    fft_done <= 1'b1;
-
-                    state <= IDLE;
-
+                else begin
+                    j <= j + 1'b1;
                 end
-
-                default:
-                begin
-                    state <= IDLE;
-                end
-
-            endcase
-
+            end
         end
-
     end
 
 endmodule
