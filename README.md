@@ -199,18 +199,17 @@ Before computing the FFT, the mean is removed to reduce the DC component.
 
 The magnitude spectrum is calculated and displayed against frequency.
 
-For \(N\) samples and sampling frequency \(F_s\), the frequency resolution is:
+### Frequency Resolution
 
-\[
-\Delta f=\frac{F_s}{N}
-\]
+$$
+\Delta f = \frac{F_s}{N}
+$$
 
-The Nyquist frequency is:
+### Nyquist Frequency
 
-\[
-f_N=\frac{F_s}{2}
-\]
-
+$$
+f_N = \frac{F_s}{2}
+$$
 The FFT plot helps examine the frequency content remaining after moving-average filtering.
 
 > The FFT in this project is calculated in MATLAB, not by a dedicated FPGA FFT accelerator.
@@ -411,9 +410,10 @@ Through this project, the following concepts are explored:
 
 ## 👨‍💻 Author
 
-**Name:** [Your Name]  
+**Name:** Naveenraj S
 **Department:** Electronics and Communication Engineering  
 **Institution:** Bannari Amman Institute of Technology
+**Linkedin:** https://www.linkedin.com/in/naveenraj07/
 
 ## 🙏 Acknowledgements
 
@@ -421,6 +421,4 @@ I would like to thank my faculty members, mentors, and everyone who supported th
 
 This project helped strengthen my understanding of Digital Signal Processing, FPGA implementation, MATLAB-based verification, and hardware/software integration.
 
-## 📜 License
 
-Choose a license appropriate for your project before publishing the repository. For example, the MIT License may be suitable for an open-source project if you are authorized to release the included code under those terms.
