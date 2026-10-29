@@ -210,6 +210,8 @@ $$
 $$
 f_N = \frac{F_s}{2}
 $$
+
+
 The FFT plot helps examine the frequency content remaining after moving-average filtering.
 
 > The FFT in this project is calculated in MATLAB, not by a dedicated FPGA FFT accelerator.
