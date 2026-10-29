@@ -117,14 +117,19 @@ The random number generator is initialized using a fixed seed so that the same t
 ### 2. Signal Scaling and Quantization
 
 The generated signal is represented in physical units, such as millimetres. Since the FPGA receives digital samples, the signal is mapped to the unsigned 16-bit range.
+### Signal Scaling and Quantization
 
-The conversion is:
+The input signal is mapped to a 16-bit unsigned integer range using:
 
-\[
-q[n]=\frac{x[n]-x_{\min}}{x_{\max}-x_{\min}}\times65535
-\]
+$$
+q[n] = \frac{x[n]-x_{\min}}{x_{\max}-x_{\min}} \times 65535
+$$
 
-The result is rounded and constrained to the range 0–65535.
+The resulting value is rounded to the nearest integer and clipped to the range:
+
+$$
+0 \leq q[n] \leq 65535
+$$
 
 This allows each sample to be transmitted as two 8-bit bytes over UART.
 
@@ -145,25 +150,31 @@ The communication sequence is:
 
 For the uploaded implementation, the configured baud rate is 115200 baud. The COM port must match the UART interface assigned to the board.
 
-### 4. FPGA-Based Moving-Average Filter
+### 4.Moving Average Filter
 
-A 12-point moving-average filter smooths rapid variations in the input signal.
+The 12-point moving-average filter smooths rapid variations in the input signal by calculating the average of the current sample and the previous 11 samples.
 
-Its general mathematical expression is:
+**Mathematical Expression:**
 
-\[
-y[n]=\frac{1}{12}\sum_{k=0}^{11}x[n-k]
-\]
+$$
+y[n] = \frac{1}{12}\sum_{k=0}^{11} x[n-k]
+$$
 
-where:
+**Where:**
+- $x[n]$ represents the current input sample.
+- $y[n]$ represents the filtered output sample.
+- $k$ is the sample index within the filter window.
+- $12$ is the number of samples in the moving-average window.
 
-- \(x[n]\) is the input sample.
-- \(y[n]\) is the filtered output.
-- The filter window contains 12 samples.
+**Working Principle:**
 
-The filter averages the current sample and the previous 11 samples, reducing rapid fluctuations in the signal.
+The filter adds 12 consecutive input samples and divides their sum by 12 to produce the output.
 
-The MATLAB reference implementation uses integer division with `floor()`. To obtain exact agreement, the FPGA must use matching arithmetic and startup behavior.
+$$
+y[n] = \frac{x[n]+x[n-1]+\cdots+x[n-11]}{12}
+$$
+
+This averaging operation reduces rapid fluctuations and helps smooth noise in the input signal.
 
 ### 5. MATLAB Reference Verification
 
