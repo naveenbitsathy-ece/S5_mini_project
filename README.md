@@ -425,7 +425,9 @@ Through this project, the following concepts are explored:
 
 **Name:** Naveenraj S
 **Department:** Electronics and Communication Engineering  
-**Institution:** Bannari Amman Institute of Technology
+**Institution:** Bannari Amman Institute of Technology.
+
+
 **Linkedin:** https://www.linkedin.com/in/naveenraj07/
 
 ## 🙏 Acknowledgements
