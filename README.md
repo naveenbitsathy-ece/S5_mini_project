@@ -360,8 +360,6 @@ The verification procedure is:
 
 Potential sources of mismatches include incorrect byte ordering, UART synchronization errors, different integer-division behavior, arithmetic overflow, and differences in the filter's initial state.
 
-## TCL script for vivado 
-
 ## Vivado Tcl Automation
 
 Automated FPGA design flow using Tcl scripting in Vivado 2020.1 / 2025.1.
