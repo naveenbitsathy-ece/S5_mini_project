@@ -424,7 +424,9 @@ Through this project, the following concepts are explored:
 ## 👨‍💻 Author
 
 **Name:** Naveenraj S
-**Department:** Electronics and Communication Engineering  
+
+**Department:** Electronics and Communication Engineering
+
 **Institution:** Bannari Amman Institute of Technology.
 
 
