@@ -360,6 +360,85 @@ The verification procedure is:
 
 Potential sources of mismatches include incorrect byte ordering, UART synchronization errors, different integer-division behavior, arithmetic overflow, and differences in the filter's initial state.
 
+## TCL script for vivado 
+
+
+
+# =========================================================
+# Vivado Tcl Script
+# Synthesis -> Implementation -> Bitstream
+# Compatible with Vivado 2020.1 / 2025.1
+# =========================================================
+
+set_param general.maxThreads 8
+
+# ---------------------------------------------------------
+# 1. Check that a Vivado project is open
+# ---------------------------------------------------------
+
+if {[current_project -quiet] eq ""} {
+    puts "ERROR: No Vivado project is open."
+    puts "Open your .xpr project, then run this script."
+    return -code error
+}
+
+set project_name [get_property NAME [current_project]]
+puts "Project: $project_name"
+
+# ---------------------------------------------------------
+# 2. Run synthesis
+# ---------------------------------------------------------
+
+puts "\n===== STARTING SYNTHESIS ====="
+
+reset_run synth_1
+launch_runs synth_1 -jobs 8
+wait_on_run synth_1
+
+set synth_status [get_property STATUS [get_runs synth_1]]
+puts "Synthesis status: $synth_status"
+
+if {![string match "*Complete*" $synth_status]} {
+    error "Synthesis failed. Check the Vivado Messages window."
+}
+
+# ---------------------------------------------------------
+# 3. Run implementation through bitstream generation
+# ---------------------------------------------------------
+
+puts "\n===== STARTING IMPLEMENTATION ====="
+
+reset_run impl_1
+launch_runs impl_1 -to_step write_bitstream -jobs 8
+wait_on_run impl_1
+
+set impl_status [get_property STATUS [get_runs impl_1]]
+puts "Implementation status: $impl_status"
+
+if {![string match "*Complete*" $impl_status]} {
+    error "Implementation or bitstream generation failed."
+}
+
+# ---------------------------------------------------------
+# 4. Display bitstream location
+# ---------------------------------------------------------
+
+puts "\n===== FLOW FINISHED ====="
+puts "Project: $project_name"
+
+set bit_files [get_files -quiet -all *.bit]
+
+if {[llength $bit_files] > 0} {
+    foreach bit_file $bit_files {
+        puts "Bitstream: $bit_file"
+    }
+} else {
+    puts "Check the implementation run directory for the .bit file."
+}
+
+puts "Synthesis, implementation and bitstream flow completed."
+
+
 ## 📁 Suggested Repository Structure
 
 ```text
