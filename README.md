@@ -362,33 +362,41 @@ Potential sources of mismatches include incorrect byte ordering, UART synchroniz
 
 ## TCL script for vivado 
 
+## Vivado Tcl Automation
 
+Automated FPGA design flow using Tcl scripting in Vivado 2020.1 / 2025.1.
 
+### Automated Workflow
+
+1. Project verification
+2. Synthesis
+3. Implementation
+4. Bitstream generation
+5. Build status and bitstream location reporting
+
+### Tcl Script
+
+Save the following script as `run_fpga_flow.tcl`.
+
+```tcl
 # =========================================================
-# Vivado Tcl Script
-# Synthesis -> Implementation -> Bitstream
+# Vivado Tcl Automation
+# Synthesis -> Implementation -> Bitstream Generation
 # Compatible with Vivado 2020.1 / 2025.1
 # =========================================================
 
 set_param general.maxThreads 8
 
-# ---------------------------------------------------------
-# 1. Check that a Vivado project is open
-# ---------------------------------------------------------
-
+# 1. Check Vivado Project
 if {[current_project -quiet] eq ""} {
     puts "ERROR: No Vivado project is open."
-    puts "Open your .xpr project, then run this script."
-    return -code error
+    error "Please open the .xpr project first."
 }
 
 set project_name [get_property NAME [current_project]]
 puts "Project: $project_name"
 
-# ---------------------------------------------------------
-# 2. Run synthesis
-# ---------------------------------------------------------
-
+# 2. Run Synthesis
 puts "\n===== STARTING SYNTHESIS ====="
 
 reset_run synth_1
@@ -396,16 +404,13 @@ launch_runs synth_1 -jobs 8
 wait_on_run synth_1
 
 set synth_status [get_property STATUS [get_runs synth_1]]
-puts "Synthesis status: $synth_status"
+puts "Synthesis Status: $synth_status"
 
 if {![string match "*Complete*" $synth_status]} {
-    error "Synthesis failed. Check the Vivado Messages window."
+    error "Synthesis failed. Check Vivado messages."
 }
 
-# ---------------------------------------------------------
-# 3. Run implementation through bitstream generation
-# ---------------------------------------------------------
-
+# 3. Run Implementation and Bitstream Generation
 puts "\n===== STARTING IMPLEMENTATION ====="
 
 reset_run impl_1
@@ -413,18 +418,14 @@ launch_runs impl_1 -to_step write_bitstream -jobs 8
 wait_on_run impl_1
 
 set impl_status [get_property STATUS [get_runs impl_1]]
-puts "Implementation status: $impl_status"
+puts "Implementation Status: $impl_status"
 
 if {![string match "*Complete*" $impl_status]} {
     error "Implementation or bitstream generation failed."
 }
 
-# ---------------------------------------------------------
-# 4. Display bitstream location
-# ---------------------------------------------------------
-
+# 4. Display Bitstream Location
 puts "\n===== FLOW FINISHED ====="
-puts "Project: $project_name"
 
 set bit_files [get_files -quiet -all *.bit]
 
@@ -433,10 +434,29 @@ if {[llength $bit_files] > 0} {
         puts "Bitstream: $bit_file"
     }
 } else {
-    puts "Check the implementation run directory for the .bit file."
+    puts "Check the implementation run directory."
 }
 
 puts "Synthesis, implementation and bitstream flow completed."
+```
+
+### How to Execute
+
+1. Open your Vivado project (`.xpr`).
+2. Open the Tcl Console.
+3. Navigate to the directory containing the script.
+4. Execute:
+
+```tcl
+source run_fpga_flow.tcl
+```
+
+### Expected Output
+
+- Synthesis completed successfully.
+- Implementation completed successfully.
+- FPGA bitstream (`.bit`) generated.
+- Bitstream location displayed in the Tcl Console.
 
 
 ## 📁 Suggested Repository Structure
